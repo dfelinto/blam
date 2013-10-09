@@ -2373,7 +2373,7 @@ def register():
     bpy.types.Scene.blam = PointerProperty(type=BlamSceneSettings, name="Blam Scene Settings")
     bpy.types.MovieClip.blam = PointerProperty(type=BlamClipSettings, name="Blam Clip Settings")
 
-    bpy.types.SpaceClipEditor.draw_handler_add(draw_rectangle_callback_px, (None,), 'WINDOW', 'POST_PIXEL')
+    bpy._blamhandle = bpy.types.SpaceClipEditor.draw_handler_add(draw_rectangle_callback_px, (None,), 'WINDOW', 'POST_PIXEL')
 
 
 def unregister():
@@ -2381,7 +2381,7 @@ def unregister():
     del bpy.types.Scene.blam
     del bpy.types.MovieClip.blam
 
-    #bpy.types.SpaceClipEditor.draw_handler_remove(draw_rectangle_callback_px)
+    bpy.types.SpaceClipEditor.draw_handler_remove(bpy._blamhandle, 'WINDOW')
 
 
 if __name__ == "__main__":
