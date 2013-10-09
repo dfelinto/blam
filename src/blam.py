@@ -2123,6 +2123,8 @@ class CLIP_OT_blam_rectangle_reset(bpy.types.Operator):
         settings.corner3 = ""
         settings.show_preview = False
 
+        scene.blam.movieclip = ""
+
         return {'FINISHED'}
 
 
@@ -2154,7 +2156,31 @@ class CLIP_OT_blam_rectangle_set(bpy.types.Operator):
         settings.corner2 = self._selected_tracks[2].name
         settings.corner3 = self._selected_tracks[3].name
 
+        # store to use in the OpenGL callback
+        scene.blam.movieclip = movieclip.name
+
         return {'FINISHED'}
+
+
+@bpy.app.handlers.persistent
+def draw_rectangle_callback_px(not_used):
+    """"""
+    import blf
+
+    scene = bpy.context.scene
+    movieclip = bpy.data.movieclips.get(scene.blam.movieclip)
+
+    if not movieclip: return
+
+    settings = movieclip.blam
+    if not settings.show_preview: return
+
+    font_id = 0  # XXX, need to find out how best to get this.
+
+    # draw some text
+    blf.position(font_id, 15, 30, 0)
+    blf.size(font_id, 20, 72)
+    blf.draw(font_id, "Hello Word")
 
 
 class BlamSceneSettings(bpy.types.PropertyGroup):
@@ -2245,6 +2271,8 @@ class BlamSceneSettings(bpy.types.PropertyGroup):
         default='hq'
         )
 
+    movieclip = StringProperty()
+
 
 class BlamClipSettings(bpy.types.PropertyGroup):
     """"""
@@ -2264,11 +2292,15 @@ def register():
     bpy.types.Scene.blam = PointerProperty(type=BlamSceneSettings, name="Blam Scene Settings")
     bpy.types.MovieClip.blam = PointerProperty(type=BlamClipSettings, name="Blam Clip Settings")
 
+    bpy.types.SpaceClipEditor.draw_handler_add(draw_rectangle_callback_px, (None,), 'WINDOW', 'POST_PIXEL')
+
 
 def unregister():
     bpy.utils.unregister_module(__name__)
     del bpy.types.Scene.blam
     del bpy.types.MovieClip.blam
+
+    bpy.types.SpaceClipEditor.draw_handler_remove(draw_rectangle_callback_px)
 
 
 if __name__ == "__main__":
