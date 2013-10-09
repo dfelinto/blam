@@ -24,6 +24,7 @@ from bpy.props import EnumProperty,      \
                       StringProperty,    \
                       PointerProperty
 
+from bgl import *
 
 bl_info = { \
     'name': 'BLAM - The Blender camera calibration toolkit',
@@ -2083,6 +2084,58 @@ def selected_markers(cls, context):
     return len(cls._selected_tracks)
 
 
+def view_setup():
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+
+    glOrtho(0, 1, 0, 1, -15, 15)
+    gluLookAt(0.0, 0.0, 1.0, 0.0,0.0,0.0, 0.0,1.0,0.0)
+
+
+def view_reset(viewport):
+    # Get texture info
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+
+    glMatrixMode(GL_MODELVIEW)
+    glPopMatrix()
+
+    glViewport(viewport[0], viewport[1], viewport[2], viewport[3])
+
+
+def draw_rectangle(region, width, height, coordinates=((1,1),(0,1),(0,0),(1,0))):
+    verco = []
+    for x,y in coordinates:
+        co = list(region.view2d.view_to_region(x,y, False))
+        co[0] /= float(width)
+        co[1] /= float(height)
+        verco.append(co)
+
+    glPolygonMode(GL_FRONT_AND_BACK , GL_FILL)
+    glEnable(GL_BLEND)
+    glBegin(GL_QUADS)
+    for i in range(4):
+        glColor4f(1.0, 1.0, 0.0, 0.5)
+        glVertex2f(verco[i][0], verco[i][1])
+    glEnd()
+    glDisable(GL_BLEND)
+
+def get_markers_coordinates(tracking, settings, id=0):
+    coordinates =[]
+    for name in (settings.corner0, settings.corner1, settings.corner2, settings.corner3):
+        track = tracking.tracks.get(name)
+        if not track: return None
+
+        coordinates.append(track.markers[id].co)
+
+    return coordinates
+
+
 def valid_track(movieclip, name):
     """returns if there a track with the name"""
     if not movieclip or name == "": return False
@@ -2091,6 +2144,16 @@ def valid_track(movieclip, name):
     track = tracking.tracks.get(name)
 
     return track
+
+
+def get_clipeditor_region():
+    for area in bpy.context.screen.areas:
+        if area.type == 'CLIP_EDITOR':
+            for region in area.regions:
+                if region.type == 'WINDOW':
+                    return region, region.width, region.height
+
+    return None, 0, 0
 
 
 class CLIP_OT_blam_rectangle_reset(bpy.types.Operator):
@@ -2175,6 +2238,24 @@ def draw_rectangle_callback_px(not_used):
     settings = movieclip.blam
     if not settings.show_preview: return
 
+    tracking = movieclip.tracking.objects[movieclip.tracking.active_object_index]
+
+    region, width, height = get_clipeditor_region()
+    if not region: return
+
+    viewport = Buffer(GL_INT, 4)
+    glGetIntegerv(GL_VIEWPORT, viewport)
+
+    # set identity matrices
+    view_setup()
+
+    coordinates = get_markers_coordinates(tracking, settings)
+    draw_rectangle(region, width, height, coordinates)
+
+    # restore opengl defaults
+    view_reset(viewport)
+
+    glColor4f(1.0, 1.0, 1.0, 1.0)
     font_id = 0  # XXX, need to find out how best to get this.
 
     # draw some text
@@ -2300,7 +2381,7 @@ def unregister():
     del bpy.types.Scene.blam
     del bpy.types.MovieClip.blam
 
-    bpy.types.SpaceClipEditor.draw_handler_remove(draw_rectangle_callback_px)
+    #bpy.types.SpaceClipEditor.draw_handler_remove(draw_rectangle_callback_px)
 
 
 if __name__ == "__main__":
