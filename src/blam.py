@@ -1599,8 +1599,9 @@ class CameraCalibrationPanel(bpy.types.Panel):
             col.separator()
             col.prop(blam, 'optical_center_type')
 
-        else: #RECTANGLE
-            pass
+        elif calibration_type ==  'RECTANGLE':
+            col.operator("clip.blam_rectangle_set", icon="CAMERA_DATA")
+            col.operator("clip.blam_rectangle_reset", icon="CANCEL")
 
         col.separator()
         col.prop(blam, 'set_cambg')
@@ -2050,8 +2051,113 @@ class CameraCalibrationOperator(bpy.types.Operator):
 
         return{'FINISHED'}
 
+# ####################################################
+#
+# Rectangle Calibration
+#
+# ####################################################
+def context_clip(context):
+    sc = context.space_data
 
-class BlamSettings(bpy.types.PropertyGroup):
+    if sc.type != 'CLIP_EDITOR':
+        return False
+
+    if not sc.clip or not context.edit_movieclip:
+        return False
+
+    if sc.view != 'CLIP':
+        return False
+
+    return True
+
+
+def selected_markers(cls, context):
+    movieclip = context.edit_movieclip
+    tracking = movieclip.tracking.objects[movieclip.tracking.active_object_index]
+
+    cls._selected_tracks = []
+    for track in tracking.tracks:
+        if track.select:
+            cls._selected_tracks.append(track)
+
+    return len(cls._selected_tracks)
+
+
+def valid_track(movieclip, name):
+    """returns if there a track with the name"""
+    if not movieclip or name == "": return False
+
+    tracking = movieclip.tracking.objects[movieclip.tracking.active_object_index]
+    track = tracking.tracks.get(name)
+
+    return track
+
+
+class CLIP_OT_blam_rectangle_reset(bpy.types.Operator):
+    """"""
+    bl_idname = "clip.blam_rectangle_reset"
+    bl_label = "Reset Rectangle"
+    bl_description = "Reset the selected tracks"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        if not context_clip(context):
+            return False
+
+        scene = context.scene
+        movieclip = context.edit_movieclip
+        settings = movieclip.blam
+
+        return settings.show_preview or \
+            valid_track(movieclip, settings.corner0)
+
+    def execute(self, context):
+        scene = context.scene
+        movieclip = context.edit_movieclip
+        settings = movieclip.blam
+
+        settings.corner0 = ""
+        settings.corner1 = ""
+        settings.corner2 = ""
+        settings.corner3 = ""
+        settings.show_preview = False
+
+        return {'FINISHED'}
+
+
+class CLIP_OT_blam_rectangle_set(bpy.types.Operator):
+    """"""
+    bl_idname = "clip.blam_rectangle_set"
+    bl_label = "Set Rectangle"
+    bl_description = "Set the selected tracks"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        if not context_clip(context): return False
+        if selected_markers(cls, context) != 4: return False
+
+        movieclip = context.edit_movieclip
+        settings = movieclip.blam
+
+        return not valid_track(movieclip, settings.corner0)
+
+    def execute(self, context):
+        scene = context.scene
+        movieclip = context.edit_movieclip
+        settings = movieclip.blam
+
+        settings.show_preview = True
+        settings.corner0 = self._selected_tracks[0].name
+        settings.corner1 = self._selected_tracks[1].name
+        settings.corner2 = self._selected_tracks[2].name
+        settings.corner3 = self._selected_tracks[3].name
+
+        return {'FINISHED'}
+
+
+class BlamSceneSettings(bpy.types.PropertyGroup):
     """"""
     calibration_type = EnumProperty(
         name="Method",
@@ -2140,14 +2246,29 @@ class BlamSettings(bpy.types.PropertyGroup):
         )
 
 
+class BlamClipSettings(bpy.types.PropertyGroup):
+    """"""
+    corner0 = StringProperty()
+    corner1 = StringProperty()
+    corner2 = StringProperty()
+    corner3 = StringProperty()
+
+    show_preview = BoolProperty(
+        name="Show Rectangle Preview",
+        default=False
+        )
+
+
 def register():
     bpy.utils.register_module(__name__)
-    bpy.types.Scene.blam = PointerProperty(type=BlamSettings, name="Blam Settings")
+    bpy.types.Scene.blam = PointerProperty(type=BlamSceneSettings, name="Blam Scene Settings")
+    bpy.types.MovieClip.blam = PointerProperty(type=BlamClipSettings, name="Blam Clip Settings")
 
 
 def unregister():
     bpy.utils.unregister_module(__name__)
     del bpy.types.Scene.blam
+    del bpy.types.MovieClip.blam
 
 
 if __name__ == "__main__":
