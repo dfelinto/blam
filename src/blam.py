@@ -21,6 +21,7 @@ import math, cmath
 
 from bpy.props import EnumProperty,      \
                       BoolProperty,      \
+                      StringProperty,    \
                       PointerProperty
 
 
@@ -1598,7 +1599,7 @@ class CameraCalibrationPanel(bpy.types.Panel):
             col.separator()
             col.prop(blam, 'optical_center_type')
 
-        else:
+        else: #RECTANGLE
             pass
 
         col.separator()
@@ -2057,6 +2058,7 @@ class BlamSettings(bpy.types.PropertyGroup):
         description="The type of calibration method to use",
         items=(("ONE_VP", "One Vanishing Point", "Estimates the camera orientation using a known focal length, a single vanishing point and an optional horizon tilt angle"),
                ("TWO_VP", "Two Vanishing Points", "Estimates the camera focal length and orientation from two vanishing points"),
+               ("RECTANGLE", "Rectangle", "Estimates the orientation from four corners"),
                ),
         default="TWO_VP"
         )
