@@ -2125,13 +2125,20 @@ def draw_rectangle(region, width, height, coordinates=((1,1),(0,1),(0,0),(1,0)))
     glEnd()
     glDisable(GL_BLEND)
 
-def get_markers_coordinates(tracking, settings, id=0):
+def get_markers_coordinates(tracking, settings, frame=1):
     coordinates =[]
     for name in (settings.corner0, settings.corner1, settings.corner2, settings.corner3):
         track = tracking.tracks.get(name)
-        if not track: return None
+        if not track:
+            coordinates.append((0,0))
+            continue
 
-        coordinates.append(track.markers[id].co)
+        marker = track.markers.find_frame(frame)
+        if not marker:
+            coordinates.append((0,0))
+            continue
+
+        coordinates.append(marker.co)
 
     return coordinates
 
@@ -2249,12 +2256,14 @@ def draw_rectangle_callback_px(not_used):
     # set identity matrices
     view_setup()
 
-    coordinates = get_markers_coordinates(tracking, settings)
+    frame_current = scene.frame_current
+    coordinates = get_markers_coordinates(tracking, settings, frame_current)
     draw_rectangle(region, width, height, coordinates)
 
     # restore opengl defaults
     view_reset(viewport)
 
+    """
     glColor4f(1.0, 1.0, 1.0, 1.0)
     font_id = 0  # XXX, need to find out how best to get this.
 
@@ -2262,6 +2271,7 @@ def draw_rectangle_callback_px(not_used):
     blf.position(font_id, 15, 30, 0)
     blf.size(font_id, 20, 72)
     blf.draw(font_id, "Hello Word")
+    """
 
 
 class BlamSceneSettings(bpy.types.PropertyGroup):
