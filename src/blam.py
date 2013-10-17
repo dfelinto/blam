@@ -1567,6 +1567,9 @@ class CameraCalibrationPanel(bpy.types.Panel):
         layout = self.layout
         blam = context.scene.blam
 
+        movieclip = context.edit_movieclip
+        show_preview = movieclip.blam.show_preview
+
         col = layout.column()
         col.prop(blam, 'calibration_type')
         col.separator()
@@ -1605,6 +1608,21 @@ class CameraCalibrationPanel(bpy.types.Panel):
             col.operator("clip.blam_rectangle_set", icon="CAMERA_DATA")
             col.operator("clip.blam_rectangle_reset", icon="CANCEL")
 
+            sub = col.column()
+            sub.active = show_preview
+            box = sub.box()
+            box.label("Segments 1 and 3")
+            box.prop(blam, 'vp1_axis_xy')
+
+            sub.separator()
+
+            box = sub.box()
+            box.label("Segments 2 and 4")
+            box.prop(blam, 'vp2_axis_xy')
+
+            sub.separator()
+            sub.prop(blam, 'optical_center_type')
+
         col.separator()
         col.prop(blam, "use_focal_length")
         sub = col.column()
@@ -1627,6 +1645,21 @@ class CameraCalibrationOperator(bpy.types.Operator):
     bl_idname = "object.estimate_focal_length"
     bl_label = "Calibrate Active Camera"
     bl_description = "Computes the focal length and orientation of the active camera based on the provided grease pencil strokes."
+
+    @classmethod
+    def poll(cls, context):
+        if not context_clip(context):
+            return False
+
+        scene = context.scene
+        if scene.blam.calibration_type != 'RECTANGLE':
+            return True
+
+        movieclip = context.edit_movieclip
+        settings = movieclip.blam
+
+        return settings.show_preview or \
+            valid_track(movieclip, settings.corner0)
 
     def computeSecondVanishingPoint(self, Fu, f, P, horizonDir):
         '''Computes the coordinates of the second vanishing point
@@ -1766,6 +1799,35 @@ class CameraCalibrationOperator(bpy.types.Operator):
 
         return M
 
+    def gatherMarkerSegments(self, context):
+        '''Collects and returns line segments in normalized image coordinates
+        from the created plane.
+        \return A list of line segment sets. [i][j][k][l] is coordinate l of point k
+        in segment j from layer i.
+        '''
+        vpLineSets = []
+
+        scene = context.scene
+        movieclip = context.edit_movieclip
+        settings = movieclip.blam
+
+        tracking = movieclip.tracking.objects[movieclip.tracking.active_object_index]
+        coordinates = get_markers_coordinates(tracking, settings, scene.frame_current)
+
+        norm_co = []
+        for x,y in coordinates:
+            nx = x / float(width)
+            ny = y / float(height)
+            norm_co.append((nx,ny))
+
+        v0,v1,v2,v3 = norm_co
+        vpLineSets.append( [v0,v1] )
+        vpLineSets.append( [v3,v2] )
+        vpLineSets.append( [v0,v3] )
+        vpLineSets.append( [v1,v2] )
+
+        return vpLineSets
+
     def gatherGreasePencilSegments(self, context):
         '''Collects and returns line segments in normalized image coordinates
         from the first two grease pencil layers.
@@ -1889,7 +1951,15 @@ class CameraCalibrationOperator(bpy.types.Operator):
                 self.report({'ERROR'}, "The two line sets cannot be parallel to the same axis.")
                 return{'CANCELLED'}
         elif calibration_method == 'RECTANGLE':
+            vp1AxisIndex = ['x', 'y'].index(blam.vp1_axis_xy)
+            vp2AxisIndex = ['x', 'y'].index(blam.vp2_axis_xy)
+            vpAxisIndices = [vp1AxisIndex, vp2AxisIndex]
+
+            if vp1AxisIndex == vp2AxisIndex:
+                self.report({'ERROR'}, "The axis need to be different.")
+                return{'CANCELLED'}
             setBgImg = blam.set_cambg
+
         else:
             assert(False)
 
@@ -1902,7 +1972,11 @@ class CameraCalibrationOperator(bpy.types.Operator):
             self.report({'ERROR'}, "There is no active movie clip.")
             return{'CANCELLED'}
 
-        if calibration_method != 'RECTANGLE':
+        # gather the points (from markers or grease pencil)
+        if calibration_method == 'RECTANGLE':
+            vpLineSets = self.gatherMarkerSegments(context)
+
+        else:
             #check that we have the number of layers we need
             if not active_space.clip.grease_pencil:
                 self.report({'ERROR'}, "There is no grease pencil datablock.")
@@ -1973,7 +2047,8 @@ class CameraCalibrationOperator(bpy.types.Operator):
             Fu = self.relImgCoords2ImgPlaneCoords(vp1, imageWidth, imageHeight)
             Fv = self.computeSecondVanishingPoint(Fu, f, P, horizDir)
 
-        elif calibration_method == 'TWO_VP':
+        else:
+            # 'TWO_VP' or 'RECTANGLE'
             '''
             calibration using two vanishing points
             '''
@@ -2019,15 +2094,10 @@ class CameraCalibrationOperator(bpy.types.Operator):
                     self.report({'ERROR'}, "Failed to compute focal length. Invalid vanishing point constellation.")
                     return{'CANCELLED'}
             else:
-                f = focal_length
-
-        elif calibration_method == 'RECTANGLE':
-            '''
-            calibration using two vanishing points
-            '''
-            # calculate Fu, Fv, P
-            if use_focal_length:
-                f = focal_length
+                if imageWidth >= imageHeight:
+                    f = focal_length / cam.data.sensor_height
+                else:
+                    f = focal_length / cam.data.sensor_width
 
         '''
         compute camera orientation
@@ -2302,6 +2372,9 @@ def draw_rectangle_callback_px(not_used):
     blf.draw(font_id, "Hello Word")
     """
 
+X = ("x","X Axis","xd")
+Y = ("y","Y Axis","yd")
+Z = ("z","Z Axis","zd")
 
 class BlamSceneSettings(bpy.types.PropertyGroup):
     """"""
@@ -2318,9 +2391,9 @@ class BlamSceneSettings(bpy.types.PropertyGroup):
     vp1_axis = EnumProperty(
         name="Parallel to",
         description="The axis to which the line segments from the first layer are parallel",
-        items=(("x","X Axis","xd"),
-               ("y","Y Axis","yd"),
-               ("z","Z Axis","zd"),
+        items=(X,
+               Y,
+               Z,
                ),
         default="x"
         )
@@ -2328,9 +2401,9 @@ class BlamSceneSettings(bpy.types.PropertyGroup):
     vp2_axis = EnumProperty(
         name="Parallel to",
         description="The axis to which the line segments from the second layer are parallel",
-        items=(("x","X Axis","xd"),
-               ("y","Y Axis","yd"),
-               ("z","Z Axis","zd"),
+        items=(X,
+               Y,
+               Z,
                ),
         default="y"
         )
@@ -2338,11 +2411,29 @@ class BlamSceneSettings(bpy.types.PropertyGroup):
     up_axis = EnumProperty(
         name="Up Axis",
         description="The up axis for single vanishing point calibration",
-        items=(("x","X Axis","xd"),
-               ("y","Y Axis","yd"),
-               ("z","Z Axis","zd"),
+        items=(X,
+               Y,
+               Z,
                ),
         default="z"
+        )
+
+    vp1_axis_xy = EnumProperty(
+        name="Parallel to",
+        description="The axis to which the first side of the rectangle is parallel to.",
+        items=(X,
+               Y,
+               ),
+        default="x"
+        )
+
+    vp2_axis_xy = EnumProperty(
+        name="Parallel to",
+        description="The axis to which the second side of the rectangle is parallel to.",
+        items=(X,
+               Y,
+               ),
+        default="y"
         )
 
     optical_center_type = EnumProperty(
