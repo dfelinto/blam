@@ -1799,7 +1799,23 @@ class CameraCalibrationOperator(bpy.types.Operator):
 
         return M
 
-    def gatherMarkerSegments(self, context):
+    def printCoordinates(self, c):
+        '''debug routine'''
+        return
+        print("\n\n\n")
+        print("printSegment()")
+
+        print("[")
+        for i in range(2):
+            print("[")
+            for j in range(2):
+                print("[(%4.2f,%4.2f),(%4.2f,%4.2f)]" % (c[i][j][0][0], c[i][j][0][1], c[i][j][1][0], c[i][j][1][1]  ))
+            print("]")
+        print("]")
+        print("\n\n\n")
+
+
+    def gatherMarkerSegments(self, context, width, height):
         '''Collects and returns line segments in normalized image coordinates
         from the created plane.
         \return A list of line segment sets. [i][j][k][l] is coordinate l of point k
@@ -1814,18 +1830,15 @@ class CameraCalibrationOperator(bpy.types.Operator):
         tracking = movieclip.tracking.objects[movieclip.tracking.active_object_index]
         coordinates = get_markers_coordinates(tracking, settings, scene.frame_current)
 
-        norm_co = []
-        for x,y in coordinates:
-            nx = x / float(width)
-            ny = y / float(height)
-            norm_co.append((nx,ny))
+        v0,v1,v2,v3 = coordinates
 
-        v0,v1,v2,v3 = norm_co
-        vpLineSets.append( [v0,v1] )
-        vpLineSets.append( [v3,v2] )
-        vpLineSets.append( [v0,v3] )
-        vpLineSets.append( [v1,v2] )
+        segment= [  [v0,v1], [v3,v2] ]
+        vpLineSets.append(segment)
 
+        segment= [  [v0,v3], [v1,v2] ]
+        vpLineSets.append(segment)
+
+        self.printCoordinates(vpLineSets)
         return vpLineSets
 
     def gatherGreasePencilSegments(self, context):
@@ -1854,6 +1867,8 @@ class CameraCalibrationOperator(bpy.types.Operator):
                     lines.append(line)
 
             vpLineSets.append(lines)
+
+        self.printCoordinates(vpLineSets)
         return vpLineSets
 
     def computeIntersectionPointForLineSegments(self, lineSet):
@@ -1972,9 +1987,12 @@ class CameraCalibrationOperator(bpy.types.Operator):
             self.report({'ERROR'}, "There is no active movie clip.")
             return{'CANCELLED'}
 
+        imageWidth = active_space.clip.size[0]
+        imageHeight = active_space.clip.size[1]
+
         # gather the points (from markers or grease pencil)
         if calibration_method == 'RECTANGLE':
-            vpLineSets = self.gatherMarkerSegments(context)
+            vpLineSets = self.gatherMarkerSegments(context, imageWidth, imageHeight)
 
         else:
             #check that we have the number of layers we need
@@ -2010,8 +2028,6 @@ class CameraCalibrationOperator(bpy.types.Operator):
         TODO: get the value from the camera data panel,
         currently always using the image center
         '''
-        imageWidth = active_space.clip.size[0]
-        imageHeight = active_space.clip.size[1]
 
         #principal point in image plane coordinates.
         #in the middle of the image by default
