@@ -22,7 +22,8 @@ import math, cmath
 from bpy.props import EnumProperty,      \
                       BoolProperty,      \
                       StringProperty,    \
-                      PointerProperty
+                      PointerProperty,   \
+                      FloatProperty
 
 from bgl import *
 
@@ -1605,6 +1606,12 @@ class CameraCalibrationPanel(bpy.types.Panel):
             col.operator("clip.blam_rectangle_reset", icon="CANCEL")
 
         col.separator()
+        col.prop(blam, "use_focal_length")
+        sub = col.column()
+        sub.active = blam.use_focal_length
+        sub.prop(blam, "focal_length")
+
+        col.separator()
         col.prop(blam, 'set_cambg')
         col.operator("object.estimate_focal_length")
 
@@ -1846,9 +1853,11 @@ class CameraCalibrationOperator(bpy.types.Operator):
         scene = context.scene
         blam = scene.blam
 
-        singleVp = blam.calibration_type == 'ONE_VP'
+        calibration_method = blam.calibration_type
         useHorizonSegment = blam.use_horizon_segment
         setBgImg = blam.set_cambg
+        use_focal_length = blam.use_focal_length
+        focal_length = blam.focal_length
 
         '''
         get the active camera
@@ -1861,7 +1870,7 @@ class CameraCalibrationOperator(bpy.types.Operator):
         '''
         check settings
         '''
-        if singleVp:
+        if calibration_method == 'ONE_VP':
             upAxisIndex = ['x', 'y', 'z'].index(blam.up_axis)
             vp1AxisIndex = ['x', 'y', 'z'].index(blam.vp1_axis)
 
@@ -1870,7 +1879,7 @@ class CameraCalibrationOperator(bpy.types.Operator):
                 return{'CANCELLED'}
             vp2AxisIndex = (set([0, 1, 2]) ^ set([upAxisIndex, vp1AxisIndex])).pop()
             vpAxisIndices = [vp1AxisIndex, vp2AxisIndex]
-        else:
+        elif calibration_method == 'TWO_VP':
             vp1AxisIndex = ['x', 'y', 'z'].index(blam.vp1_axis)
             vp2AxisIndex = ['x', 'y', 'z'].index(blam.vp2_axis)
             vpAxisIndices = [vp1AxisIndex, vp2AxisIndex]
@@ -1879,6 +1888,10 @@ class CameraCalibrationOperator(bpy.types.Operator):
             if vpAxisIndices[0] == vpAxisIndices[1]:
                 self.report({'ERROR'}, "The two line sets cannot be parallel to the same axis.")
                 return{'CANCELLED'}
+        elif calibration_method == 'RECTANGLE':
+            setBgImg = blam.set_cambg
+        else:
+            assert(False)
 
         '''
         gather lines for each vanishing point
@@ -1889,33 +1902,34 @@ class CameraCalibrationOperator(bpy.types.Operator):
             self.report({'ERROR'}, "There is no active movie clip.")
             return{'CANCELLED'}
 
-        #check that we have the number of layers we need
-        if not active_space.clip.grease_pencil:
-            self.report({'ERROR'}, "There is no grease pencil datablock.")
-            return{'CANCELLED'}
-        gpl = active_space.clip.grease_pencil.layers
-        if len(gpl) == 0:
-            self.report({'ERROR'}, "There are no grease pencil layers.")
-            return{'CANCELLED'}
-        if len(gpl) < 2 and not singleVp:
-            self.report({'ERROR'}, "Calibration using two vanishing points requires two grease pencil layers.")
-            return{'CANCELLED'}
-        if len(gpl) < 2 and singleVp and useHorizonSegment:
-            self.report({'ERROR'}, "Single vanishing point calibration with a custom horizon line requires two grease pencil layers")
-            return{'CANCELLED'}
+        if calibration_method != 'RECTANGLE':
+            #check that we have the number of layers we need
+            if not active_space.clip.grease_pencil:
+                self.report({'ERROR'}, "There is no grease pencil datablock.")
+                return{'CANCELLED'}
+            gpl = active_space.clip.grease_pencil.layers
+            if len(gpl) == 0:
+                self.report({'ERROR'}, "There are no grease pencil layers.")
+                return{'CANCELLED'}
+            if len(gpl) < 2 and calibration_method == 'TWO_VP':
+                self.report({'ERROR'}, "Calibration using two vanishing points requires two grease pencil layers.")
+                return{'CANCELLED'}
+            if len(gpl) < 2 and calibration_method == 'ONE_VP' and useHorizonSegment:
+                self.report({'ERROR'}, "Single vanishing point calibration with a custom horizon line requires two grease pencil layers")
+                return{'CANCELLED'}
 
-        vpLineSets = self.gatherGreasePencilSegments(context)
+            vpLineSets = self.gatherGreasePencilSegments(context)
 
-        #check that we have the expected number of line segment strokes
-        if len(vpLineSets[0]) < 2:
-            self.report({'ERROR'}, "The first grease pencil layer must contain at least two line segment strokes.")
-            return{'CANCELLED'}
-        if not singleVp and len(vpLineSets[1]) < 2:
-            self.report({'ERROR'}, "The second grease pencil layer must contain at least two line segment strokes.")
-            return{'CANCELLED'}
-        if singleVp and useHorizonSegment and len(vpLineSets[1]) != 1:
-            self.report({'ERROR'}, "The second grease pencil layer must contain exactly one line segment stroke (the horizon line).")
-            return{'CANCELLED'}
+            #check that we have the expected number of line segment strokes
+            if len(vpLineSets[0]) < 2:
+                self.report({'ERROR'}, "The first grease pencil layer must contain at least two line segment strokes.")
+                return{'CANCELLED'}
+            if calibration_method == 'TWO_VP' and len(vpLineSets[1]) < 2:
+                self.report({'ERROR'}, "The second grease pencil layer must contain at least two line segment strokes.")
+                return{'CANCELLED'}
+            elif calibration_method == 'ONE_VP' and useHorizonSegment and len(vpLineSets[1]) != 1:
+                self.report({'ERROR'}, "The second grease pencil layer must contain exactly one line segment stroke (the horizon line).")
+                return{'CANCELLED'}
 
         '''
         get the principal point P in image plane coordinates
@@ -1929,7 +1943,7 @@ class CameraCalibrationOperator(bpy.types.Operator):
         #in the middle of the image by default
         P = [0, 0]
 
-        if singleVp:
+        if calibration_method == 'ONE_VP':
             '''
             calibration using a single vanishing point
             '''
@@ -1950,11 +1964,16 @@ class CameraCalibrationOperator(bpy.types.Operator):
             fAbs = active_space.clip.tracking.camera.focal_length
             sensorWidth = active_space.clip.tracking.camera.sensor_width
 
-            f = fAbs / sensorWidth * imgAspect
+            if not use_focal_length:
+                f = fAbs / sensorWidth * imgAspect
+            else:
+                f = focal_length
+
             #print("fAbs", fAbs, "f rel", f)
             Fu = self.relImgCoords2ImgPlaneCoords(vp1, imageWidth, imageHeight)
             Fv = self.computeSecondVanishingPoint(Fu, f, P, horizDir)
-        else:
+
+        elif calibration_method == 'TWO_VP':
             '''
             calibration using two vanishing points
             '''
@@ -1994,11 +2013,21 @@ class CameraCalibrationOperator(bpy.types.Operator):
             Fu = self.relImgCoords2ImgPlaneCoords(vps[0], imageWidth, imageHeight)
             Fv = self.relImgCoords2ImgPlaneCoords(vps[1], imageWidth, imageHeight)
 
-            f = self.computeFocalLength(Fu, Fv, P)
+            if not use_focal_length:
+                f = self.computeFocalLength(Fu, Fv, P)
+                if f == None:
+                    self.report({'ERROR'}, "Failed to compute focal length. Invalid vanishing point constellation.")
+                    return{'CANCELLED'}
+            else:
+                f = focal_length
 
-            if f == None:
-                self.report({'ERROR'}, "Failed to compute focal length. Invalid vanishing point constellation.")
-                return{'CANCELLED'}
+        elif calibration_method == 'RECTANGLE':
+            '''
+            calibration using two vanishing points
+            '''
+            # calculate Fu, Fv, P
+            if use_focal_length:
+                f = focal_length
 
         '''
         compute camera orientation
@@ -2342,6 +2371,22 @@ class BlamSceneSettings(bpy.types.PropertyGroup):
         name="Compute from grease pencil stroke",
         description="Extract the horizon angle from a single line segment in the second grease pencil layer. If unchecked, the horizon angle is set to 0",
         default=True
+        )
+
+    use_focal_length = BoolProperty(
+        name="Specify Focal Length",
+        description="Specify the focal length of the camera or projector",
+        default=True
+        )
+
+    focal_length = FloatProperty(
+        name="Focal Length",
+        description="Focal length in milimeters",
+        min=1,
+        max=100,
+        step=1,
+        default=38.8,
+        subtype='DISTANCE'
         )
 
     '''
