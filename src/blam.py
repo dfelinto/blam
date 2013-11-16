@@ -1372,7 +1372,7 @@ class Reconstruct3DMeshOperator(bpy.types.Operator):
         #print("out edges", [e.vertices[:] for e in me.edges])
         #print("vertsToMergeByOriginalIdx")
         #print(vertsToMergeByOriginalIdx)
-        mergeVertices = not context.scene.separate_faces
+        mergeVertices = not context.scene.blam.separate_faces
         if mergeVertices:
             for vs in vertsToMergeByOriginalIdx.values():
                 print("merging verts", vs)
