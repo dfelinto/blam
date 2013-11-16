@@ -424,32 +424,43 @@ def solveCubic(a, b, c, d):
 #of the python api represents matrices as column major
 #or row major.
 def arePythonMatricesRowMajor():
-    v = bpy.app.version
-    is262OrGreater = v[0] >= 2 and v[1] >= 62
-    is260OrLess = v[0] <= 2 and v[1] <= 60
-    is261 = v[0] == 2 and v[1] == 61
-    rev = bpy.app.build_revision
+    try:
+        """
+        some users were complaining that this function was crashing in their
+        computer. This is from original blam, so I will leave to investigate
+        it later. Meanwhile, we bypass it by always returning True in case of
+        failure.
+        """
+        v = bpy.app.version
+        is262OrGreater = v[0] >= 2 and v[1] >= 62
+        is260OrLess = v[0] <= 2 and v[1] <= 60
+        is261 = v[0] == 2 and v[1] == 61
+        rev = bpy.app.build_revision
 
-    if is262OrGreater:
+        if is262OrGreater:
+            return True
+
+        if is260OrLess:
+            return False
+
+
+        #apparently, build_revision is not always just a number:
+        #http://code.google.com/p/blam/issues/detail?id=11
+        #TODO: find out what the format of bpy.app.build_revision is
+        #for now, remove anything that isn't a digit
+        digits = [str(d) for d in range(9)]
+        numberString = ''
+        for ch in rev:
+            if ch in digits:
+                numberString = numberString + ch
+
+        #do revision check if we're running 2.61
+        #matrices are row major starting in revision r42816
+        return int(numberString) >= 42816
+
+    except Exception as E:
+        print(E)
         return True
-
-    if is260OrLess:
-        return False
-
-
-    #apparently, build_revision is not always just a number:
-    #http://code.google.com/p/blam/issues/detail?id=11
-    #TODO: find out what the format of bpy.app.build_revision is
-    #for now, remove anything that isn't a digit
-    digits = [str(d) for d in range(9)]
-    numberString = ''
-    for ch in rev:
-        if ch in digits:
-            numberString = numberString + ch
-
-    #do revision check if we're running 2.61
-    #matrices are row major starting in revision r42816
-    return int(numberString) >= 42816
 
 #helper function that returns the faces of a mesh. in bmesh builds,
 #this is a list of polygons, and in pre-bmesh builds this is a list
